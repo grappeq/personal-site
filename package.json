@@ -1,39 +1,29 @@
 {
   "name": "personal-site",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
+  "type": "module",
   "dependencies": {
-    "@fortawesome/fontawesome-svg-core": "^1.2.24",
-    "@fortawesome/free-brands-svg-icons": "^5.11.1",
-    "@fortawesome/free-solid-svg-icons": "^5.11.1",
-    "@fortawesome/react-fontawesome": "^0.1.4",
-    "chroma-js": "^2.1.1",
-    "react": "^17.0.2",
-    "react-dom": "^17.0.2"
+    "@fortawesome/fontawesome-svg-core": "^7.0.0",
+    "@fortawesome/free-brands-svg-icons": "^7.0.0",
+    "@fortawesome/free-solid-svg-icons": "^7.0.0",
+    "@fortawesome/react-fontawesome": "^3.1.1",
+    "chroma-js": "^2.4.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@testing-library/jest-dom": "^5.12.0",
-    "@testing-library/react": "^11.2.7",
-    "@testing-library/user-event": "^12.8.3",
-    "react-scripts": "^4.0.3"
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^25.0.1",
+    "vite": "^6.0.0",
+    "vitest": "^4.0.0"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test --env=jsdom",
-    "eject": "react-scripts eject",
-    "deploy": "aws s3 sync ./build s3://grabowski-personal-site --delete --acl public-read"
-  },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
+    "dev": "vite",
+    "start": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "deploy": "aws s3 sync ./dist s3://grabowski-personal-site --delete --acl public-read"
   }
 }

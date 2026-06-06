@@ -71,20 +71,37 @@ html, #root, body {
     justify-content: center;
 }
 
-.email-icon {
+.email-icon-button,
+.email-copy-button {
+    background: none;
+    border: none;
+    padding: 0;
+    color: inherit;
+    font: inherit;
     cursor: pointer;
+}
+
+.email-icon {
     font-size: 2rem;
     margin: 0 1rem;
 }
 
-.email.expanded .email-icon {
+.email.expanded .email-icon-button {
     cursor: default;
 }
 
-.email-icon:hover {
+.email-icon-button:hover .email-icon,
+.email-copy-button:hover {
     color: #b5b5b5;
 }
 
 .email-text {
     letter-spacing: 0.1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.email-copy-button {
+    font-size: 1rem;
 }
