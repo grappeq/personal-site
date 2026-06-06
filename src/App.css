@@ -63,16 +63,28 @@ html, #root, body {
     padding-bottom: 1.5rem;
 }
 
+.photo-wrapper {
+    display: inline-block;
+    touch-action: none;
+    cursor: grab;
+    will-change: transform;
+}
+
+.photo-wrapper:active {
+    cursor: grabbing;
+}
+
 .photo {
     border-radius: 50%;
     width: 12rem;
     height: auto;
-    cursor: pointer;
     user-select: none;
+    pointer-events: none;
     transition: transform 0.3s ease;
+    display: block;
 }
 
-.photo:hover {
+.photo-wrapper:hover .photo {
     transform: scale(1.05);
 }
 

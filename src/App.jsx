@@ -15,6 +15,14 @@ const EMAIL_ADDRESS = atob('a2FjcGVyQGdyYWJvdy5za2k=');
 const HUE_DEGREES_PER_SECOND = 4; // full color wheel in 90s
 const MY_FACE_REFERENCE_COLOR = chroma('#EEC4CF');
 
+// Photo throw physics
+const GRAVITY = 900; // px/s^2 — low-ish (real-world ~9800 at 100dpi)
+const AIR_DRAG_PER_SECOND = 0.35; // exponential horizontal velocity decay
+const BOUNCE_DAMPING = 0.72; // velocity retained after each bounce
+const REST_SPEED = 25; // px/s — below this (on floor) we stop the loop
+const DRAG_THRESHOLD_PX = 6; // movement above this counts as drag, not click
+const VELOCITY_SAMPLE_MS = 90; // window for release-velocity calculation
+
 function colorsForHue(hue) {
     const backgroundColor = chroma.hsl(hue, 1, 0.5).saturate(3).luminance(0.8);
     const [, saturation, lightness] = backgroundColor.hsl();
@@ -28,10 +36,146 @@ function App() {
     const [colors, setColors] = useState(() => colorsForHue(baseHueRef.current));
     const [emailHidden, setEmailHidden] = useState(true);
 
+    // Photo throw state
+    const photoWrapperRef = useRef(null);
+    const dragRef = useRef(null);
+    const physicsRef = useRef(null);
+    const physicsFrameRef = useRef(null);
+    const [photoOffset, setPhotoOffset] = useState({ x: 0, y: 0 });
+
     const regenerateColors = () => {
         baseHueRef.current = Math.random() * 360;
         startTimeRef.current = performance.now();
         setColors(colorsForHue(baseHueRef.current));
+    };
+
+    const stopPhysics = () => {
+        if (physicsFrameRef.current) {
+            cancelAnimationFrame(physicsFrameRef.current);
+            physicsFrameRef.current = null;
+        }
+        physicsRef.current = null;
+    };
+
+    const startPhysics = (startX, startY, vx, vy) => {
+        const wrapper = photoWrapperRef.current;
+        if (!wrapper) return;
+        const rect = wrapper.getBoundingClientRect();
+        // Layout origin = current visual position minus the offset we've applied
+        const homeLeft = rect.left - startX;
+        const homeTop = rect.top - startY;
+        const bounds = {
+            minX: -homeLeft,
+            maxX: window.innerWidth - homeLeft - rect.width,
+            minY: -homeTop,
+            maxY: window.innerHeight - homeTop - rect.height,
+        };
+
+        physicsRef.current = { x: startX, y: startY, vx, vy };
+        let lastTime = performance.now();
+
+        const step = (now) => {
+            const p = physicsRef.current;
+            if (!p) return;
+            const dt = Math.min((now - lastTime) / 1000, 0.05); // clamp to 50ms
+            lastTime = now;
+
+            p.vy += GRAVITY * dt;
+            p.vx *= Math.exp(-AIR_DRAG_PER_SECOND * dt);
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+
+            if (p.x < bounds.minX) {
+                p.x = bounds.minX;
+                p.vx = -p.vx * BOUNCE_DAMPING;
+            } else if (p.x > bounds.maxX) {
+                p.x = bounds.maxX;
+                p.vx = -p.vx * BOUNCE_DAMPING;
+            }
+            if (p.y < bounds.minY) {
+                p.y = bounds.minY;
+                p.vy = -p.vy * BOUNCE_DAMPING;
+            } else if (p.y > bounds.maxY) {
+                p.y = bounds.maxY;
+                p.vy = -p.vy * BOUNCE_DAMPING;
+            }
+
+            setPhotoOffset({ x: p.x, y: p.y });
+
+            const atFloor = p.y >= bounds.maxY - 0.5;
+            const speed = Math.hypot(p.vx, p.vy);
+            if (atFloor && speed < REST_SPEED) {
+                stopPhysics();
+                return;
+            }
+            physicsFrameRef.current = requestAnimationFrame(step);
+        };
+
+        physicsFrameRef.current = requestAnimationFrame(step);
+    };
+
+    const onPhotoPointerDown = (e) => {
+        const wrapper = photoWrapperRef.current;
+        if (!wrapper) return;
+        e.preventDefault();
+        wrapper.setPointerCapture(e.pointerId);
+        stopPhysics();
+        dragRef.current = {
+            pointerId: e.pointerId,
+            startClientX: e.clientX,
+            startClientY: e.clientY,
+            startOffsetX: photoOffset.x,
+            startOffsetY: photoOffset.y,
+            samples: [{ t: performance.now(), x: photoOffset.x, y: photoOffset.y }],
+            moved: false,
+        };
+    };
+
+    const onPhotoPointerMove = (e) => {
+        const drag = dragRef.current;
+        if (!drag || drag.pointerId !== e.pointerId) return;
+        const dx = e.clientX - drag.startClientX;
+        const dy = e.clientY - drag.startClientY;
+        if (!drag.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
+            drag.moved = true;
+        }
+        if (!drag.moved) return;
+        const newX = drag.startOffsetX + dx;
+        const newY = drag.startOffsetY + dy;
+        setPhotoOffset({ x: newX, y: newY });
+        const now = performance.now();
+        drag.samples.push({ t: now, x: newX, y: newY });
+        const cutoff = now - VELOCITY_SAMPLE_MS;
+        while (drag.samples.length > 2 && drag.samples[0].t < cutoff) {
+            drag.samples.shift();
+        }
+    };
+
+    const onPhotoPointerUp = (e) => {
+        const drag = dragRef.current;
+        if (!drag || drag.pointerId !== e.pointerId) return;
+        photoWrapperRef.current?.releasePointerCapture(e.pointerId);
+        dragRef.current = null;
+
+        if (!drag.moved) {
+            regenerateColors();
+            return;
+        }
+
+        const finalX = drag.startOffsetX + (e.clientX - drag.startClientX);
+        const finalY = drag.startOffsetY + (e.clientY - drag.startClientY);
+        let vx = 0;
+        let vy = 0;
+        if (drag.samples.length >= 2) {
+            const first = drag.samples[0];
+            const last = drag.samples[drag.samples.length - 1];
+            const dt = (last.t - first.t) / 1000;
+            if (dt > 0) {
+                vx = (last.x - first.x) / dt;
+                vy = (last.y - first.y) / dt;
+            }
+        }
+        startPhysics(finalX, finalY, vx, vy);
     };
 
     useEffect(() => {
@@ -48,6 +192,8 @@ function App() {
         frame = requestAnimationFrame(loop);
         return () => cancelAnimationFrame(frame);
     }, []);
+
+    useEffect(() => stopPhysics, []);
 
     const textStyle = { color: colors.foregroundColor };
     const backgroundStyle = { backgroundColor: colors.backgroundColor };
@@ -67,22 +213,32 @@ function App() {
     return (
         <div className="app" style={backgroundStyle}>
             <div className="app-body">
-                <img
-                    src={photo}
-                    className="photo"
-                    style={photoStyle}
-                    alt="Photo of Kacper Grabowski"
-                    role="button"
-                    tabIndex={0}
-                    aria-label="Regenerate page colors"
-                    onClick={regenerateColors}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            regenerateColors();
-                        }
-                    }}
-                />
+                <div
+                    ref={photoWrapperRef}
+                    className="photo-wrapper"
+                    style={{ transform: `translate(${photoOffset.x}px, ${photoOffset.y}px)` }}
+                    onPointerDown={onPhotoPointerDown}
+                    onPointerMove={onPhotoPointerMove}
+                    onPointerUp={onPhotoPointerUp}
+                    onPointerCancel={onPhotoPointerUp}
+                >
+                    <img
+                        src={photo}
+                        className="photo"
+                        style={photoStyle}
+                        alt="Photo of Kacper Grabowski"
+                        role="button"
+                        tabIndex={0}
+                        aria-label="Regenerate page colors, or drag to throw"
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                regenerateColors();
+                            }
+                        }}
+                        draggable={false}
+                    />
+                </div>
                 <div className="name" style={textStyle}>
                     Kacper Grabowski
                 </div>
