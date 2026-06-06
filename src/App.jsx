@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { library } from '@fortawesome/fontawesome-svg-core';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faGithub, faLinkedin } from '@fortawesome/free-brands-svg-icons';
@@ -12,32 +12,42 @@ library.add(faGithub, faLinkedin, faEnvelope, faCopy);
 // to keep bots at bay
 const EMAIL_ADDRESS = atob('a2FjcGVyQGdyYWJvdy5za2k=');
 
-const MIN_CONTRAST_RATIO = 1.5;
+const HUE_DEGREES_PER_SECOND = 4; // full color wheel in 90s
 const MY_FACE_REFERENCE_COLOR = chroma('#EEC4CF');
 
-function generateMatchingColors() {
-    const backgroundColor = chroma.random().saturate(2).luminance(0.8);
-    const [hue, saturation, lightness] = backgroundColor.hsl();
+function colorsForHue(hue) {
+    const backgroundColor = chroma.hsl(hue, 1, 0.5).saturate(3).luminance(0.8);
+    const [, saturation, lightness] = backgroundColor.hsl();
     const foregroundColor = chroma.hsl((hue + 180) % 360, saturation, lightness);
     return { backgroundColor, foregroundColor };
 }
 
-function generateNiceContrastingColors() {
-    let last;
-    for (let i = 0; i < 100; i++) {
-        last = generateMatchingColors();
-        if (chroma.contrast(last.backgroundColor, last.foregroundColor) > MIN_CONTRAST_RATIO) {
-            return last;
-        }
-    }
-    return last;
-}
-
 function App() {
-    const [colors, setColors] = useState(generateNiceContrastingColors);
+    const baseHueRef = useRef(Math.random() * 360);
+    const startTimeRef = useRef(performance.now());
+    const [colors, setColors] = useState(() => colorsForHue(baseHueRef.current));
     const [emailHidden, setEmailHidden] = useState(true);
 
-    const regenerateColors = () => setColors(generateNiceContrastingColors());
+    const regenerateColors = () => {
+        baseHueRef.current = Math.random() * 360;
+        startTimeRef.current = performance.now();
+        setColors(colorsForHue(baseHueRef.current));
+    };
+
+    useEffect(() => {
+        if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+            return;
+        }
+        let frame;
+        const loop = (now) => {
+            const elapsed = (now - startTimeRef.current) / 1000;
+            const hue = (baseHueRef.current + elapsed * HUE_DEGREES_PER_SECOND) % 360;
+            setColors(colorsForHue(hue));
+            frame = requestAnimationFrame(loop);
+        };
+        frame = requestAnimationFrame(loop);
+        return () => cancelAnimationFrame(frame);
+    }, []);
 
     const textStyle = { color: colors.foregroundColor };
     const backgroundStyle = { backgroundColor: colors.backgroundColor };
@@ -77,7 +87,7 @@ function App() {
                     Kacper Grabowski
                 </div>
                 <div className="position" style={textStyle}>
-                    Engineering Manager
+                    Engineering Leader
                 </div>
                 <div className={`email ${emailHidden ? '' : ' expanded'}`}>
                     <button

@@ -11,7 +11,7 @@ html, #root, body {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    font-family: BlinkMacSystemFont, -apple-system, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;;
+    font-family: BlinkMacSystemFont, -apple-system, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
 .app-body {
@@ -26,7 +26,7 @@ html, #root, body {
 
 .app-footer {
     width: 100%;
-    padding-bottom: 7vh;
+    padding-bottom: 3rem;
     flex: 0 0 auto;
     display: flex;
     flex-direction: row;
@@ -36,6 +36,13 @@ html, #root, body {
 .app-footer a {
     font-size: 4rem;
     padding: 0 3rem;
+    opacity: 0.9;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.app-footer a:hover {
+    opacity: 1;
+    transform: scale(1.08);
 }
 
 .name, .position {
@@ -43,7 +50,7 @@ html, #root, body {
 }
 
 .name {
-    font-size: 2.5rem;
+    font-size: 2.75rem;
     font-weight: 600;
     letter-spacing: 0.2rem;
     padding: 1rem 0;
@@ -58,17 +65,24 @@ html, #root, body {
 
 .photo {
     border-radius: 50%;
-    width: 10rem;
+    width: 12rem;
     height: auto;
     cursor: pointer;
     user-select: none;
+    transition: transform 0.3s ease;
+}
+
+.photo:hover {
+    transform: scale(1.05);
 }
 
 .email {
     font-size: 1.25rem;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 0.6rem;
 }
 
 .email-icon-button,
@@ -79,6 +93,11 @@ html, #root, body {
     color: inherit;
     font: inherit;
     cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    transition: opacity 0.2s ease;
 }
 
 .email-icon {
@@ -90,9 +109,9 @@ html, #root, body {
     cursor: default;
 }
 
-.email-icon-button:hover .email-icon,
+.email-icon-button:hover,
 .email-copy-button:hover {
-    color: #b5b5b5;
+    opacity: 0.7;
 }
 
 .email-text {
