@@ -12,8 +12,29 @@ library.add(faGithub, faLinkedin, faEnvelope, faCopy);
 // to keep bots at bay
 const EMAIL_ADDRESS = atob('a2FjcGVyQGdyYWJvdy5za2k=');
 
-const HUE_DEGREES_PER_SECOND = 4; // full color wheel in 90s
+const HUE_DEGREES_PER_SECOND = 4; // full color wheel in ~90s (varies due to speedAt)
 const MY_FACE_REFERENCE_COLOR = chroma('#EEC4CF');
+
+// Pure blue (~240°) renders poorly compared to other hues, so accelerate through it.
+const BLUE_HUE = 240;
+const BLUE_HUE_RADIUS = 25; // ± degrees considered "near pure blue"
+const BLUE_SPEED_MULTIPLIER = 5;
+
+function hueDistance(a, b) {
+    let dist = Math.abs(a - b);
+    if (dist > 180) dist = 360 - dist;
+    return dist;
+}
+
+function speedAt(hue) {
+    // Accelerate when either the background (hue) or the foreground (hue + 180) is near blue.
+    const distBg = hueDistance(hue, BLUE_HUE);
+    const distFg = hueDistance((hue + 180) % 360, BLUE_HUE);
+    const minDist = Math.min(distBg, distFg);
+    if (minDist >= BLUE_HUE_RADIUS) return 1;
+    const proximity = 1 - minDist / BLUE_HUE_RADIUS; // 0 at edge, 1 at center
+    return 1 + (BLUE_SPEED_MULTIPLIER - 1) * proximity;
+}
 
 // Photo throw physics
 const GRAVITY = 900; // px/s^2 — low-ish (real-world ~9800 at 100dpi)
@@ -31,9 +52,8 @@ function colorsForHue(hue) {
 }
 
 function App() {
-    const baseHueRef = useRef(Math.random() * 360);
-    const startTimeRef = useRef(performance.now());
-    const [colors, setColors] = useState(() => colorsForHue(baseHueRef.current));
+    const hueRef = useRef(Math.random() * 360);
+    const [colors, setColors] = useState(() => colorsForHue(hueRef.current));
     const [emailHidden, setEmailHidden] = useState(true);
 
     // Photo throw state
@@ -44,9 +64,8 @@ function App() {
     const [photoOffset, setPhotoOffset] = useState({ x: 0, y: 0 });
 
     const regenerateColors = () => {
-        baseHueRef.current = Math.random() * 360;
-        startTimeRef.current = performance.now();
-        setColors(colorsForHue(baseHueRef.current));
+        hueRef.current = Math.random() * 360;
+        setColors(colorsForHue(hueRef.current));
     };
 
     const stopPhysics = () => {
@@ -183,10 +202,13 @@ function App() {
             return;
         }
         let frame;
+        let lastTime = performance.now();
         const loop = (now) => {
-            const elapsed = (now - startTimeRef.current) / 1000;
-            const hue = (baseHueRef.current + elapsed * HUE_DEGREES_PER_SECOND) % 360;
-            setColors(colorsForHue(hue));
+            const dt = Math.min((now - lastTime) / 1000, 0.1);
+            lastTime = now;
+            const delta = HUE_DEGREES_PER_SECOND * speedAt(hueRef.current) * dt;
+            hueRef.current = (hueRef.current + delta) % 360;
+            setColors(colorsForHue(hueRef.current));
             frame = requestAnimationFrame(loop);
         };
         frame = requestAnimationFrame(loop);
@@ -195,7 +217,7 @@ function App() {
 
     useEffect(() => stopPhysics, []);
 
-    const shadow = colors.foregroundColor.darken(1).hex();
+    const shadow = colors.foregroundColor.luminance(0.08).hex();
     const textStyle = {
         color: colors.foregroundColor,
         textShadow: `0 1px 0 ${shadow}, 1px 0 0 ${shadow}, -1px 0 0 ${shadow}, 0 -1px 0 ${shadow}`,
