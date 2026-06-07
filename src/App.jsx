@@ -195,7 +195,15 @@ function App() {
 
     useEffect(() => stopPhysics, []);
 
-    const textStyle = { color: colors.foregroundColor };
+    const shadow = colors.foregroundColor.darken(1).hex();
+    const textStyle = {
+        color: colors.foregroundColor,
+        textShadow: `0 1px 0 ${shadow}, 1px 0 0 ${shadow}, -1px 0 0 ${shadow}, 0 -1px 0 ${shadow}`,
+    };
+    const iconStyle = {
+        color: colors.foregroundColor,
+        filter: `drop-shadow(0 1px 0 ${shadow}) drop-shadow(1px 0 0 ${shadow}) drop-shadow(-1px 0 0 ${shadow}) drop-shadow(0 -1px 0 ${shadow})`,
+    };
     const backgroundStyle = { backgroundColor: colors.backgroundColor };
 
     const [hueOfMyFace] = MY_FACE_REFERENCE_COLOR.hsv();
@@ -252,7 +260,7 @@ function App() {
                         aria-label={emailHidden ? 'Reveal email address' : 'Hide email address'}
                         aria-expanded={!emailHidden}
                         onClick={() => setEmailHidden(!emailHidden)}
-                        style={textStyle}
+                        style={iconStyle}
                     >
                         <FontAwesomeIcon icon={['fas', 'envelope']} className="email-icon" />
                     </button>
@@ -266,7 +274,7 @@ function App() {
                                 className="email-copy-button"
                                 aria-label="Copy email address to clipboard"
                                 onClick={copyEmail}
-                                style={textStyle}
+                                style={iconStyle}
                             >
                                 <FontAwesomeIcon icon={['fas', 'copy']} />
                             </button>
@@ -282,7 +290,7 @@ function App() {
                     target="_blank"
                     rel="noopener noreferrer"
                 >
-                    <FontAwesomeIcon icon={['fab', 'linkedin']} style={textStyle} />
+                    <FontAwesomeIcon icon={['fab', 'linkedin']} style={iconStyle} />
                 </a>
 
                 <a
@@ -291,7 +299,7 @@ function App() {
                     target="_blank"
                     rel="noopener noreferrer"
                 >
-                    <FontAwesomeIcon icon={['fab', 'github']} style={textStyle} />
+                    <FontAwesomeIcon icon={['fab', 'github']} style={iconStyle} />
                 </a>
             </div>
         </div>
