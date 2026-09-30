@@ -49,7 +49,8 @@ const SHAKE_PX_PER_METER = 300; // scaled way down from real screen density, or 
 const SHAKE_DEADZONE = 2.5; // m/s^2 — ignore sensor noise and hand tremor while the photo is moving
 const SHAKE_KICKOFF = 12; // m/s^2 — a resting photo only takes off on a real shake, not walking or picking the phone up
 const SHAKE_MAX_SPEED = 3000; // px/s
-const MOTION_MAX_DT = 0.1; // s — cap the gap between motion events
+const MOTION_FRESH_DT = 0.016; // s — assumed dt for the first event after a pause
+const MOTION_MAX_DT = 0.1; // s — a longer gap between motion events counts as a pause
 
 const clampSpeed = (v) => Math.max(-SHAKE_MAX_SPEED, Math.min(SHAKE_MAX_SPEED, v));
 
@@ -265,7 +266,8 @@ function App() {
         const onMotion = (e) => {
             // Measure dt ourselves: e.interval units differ between browsers (ms vs s)
             const now = performance.now();
-            const dt = lastMotionTime == null ? 0.016 : Math.min((now - lastMotionTime) / 1000, MOTION_MAX_DT);
+            const gap = lastMotionTime == null ? Infinity : (now - lastMotionTime) / 1000;
+            const dt = gap > MOTION_MAX_DT ? MOTION_FRESH_DT : gap;
             lastMotionTime = now;
 
             const a = e.acceleration;
@@ -287,16 +289,29 @@ function App() {
                 startPhysics(x, y, clampSpeed(dvx), clampSpeed(dvy));
             }
         };
-        const onResize = () => {
-            const p = physicsRef.current;
-            if (p && photoWrapperRef.current) p.bounds = computeBounds(photoWrapperRef.current);
-        };
         window.addEventListener('devicemotion', onMotion);
-        window.addEventListener('resize', onResize);
-        return () => {
-            window.removeEventListener('devicemotion', onMotion);
-            window.removeEventListener('resize', onResize);
+        return () => window.removeEventListener('devicemotion', onMotion);
+    }, []);
+
+    // Shaking often triggers auto-rotate, so keep the photo inside the viewport on resize
+    useEffect(() => {
+        const onResize = () => {
+            const wrapper = photoWrapperRef.current;
+            if (!wrapper) return;
+            const bounds = computeBounds(wrapper);
+            const p = physicsRef.current;
+            if (p) {
+                p.bounds = bounds;
+                return;
+            }
+            const { x, y } = photoOffsetRef.current;
+            if (x === 0 && y === 0) return; // still at its layout position
+            if (x < bounds.minX || x > bounds.maxX || y < bounds.minY || y > bounds.maxY) {
+                startPhysics(x, y, 0, 0);
+            }
         };
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
     }, []);
 
     const shadow = colors.foregroundColor.luminance(0.08).hex();
