@@ -46,8 +46,12 @@ const VELOCITY_SAMPLE_MS = 90; // window for release-velocity calculation
 
 // Shake-to-bounce: phone acceleration is applied (inverted) to the photo, like a loose object in a box
 const SHAKE_PX_PER_METER = 300; // scaled way down from real screen density, or the photo just pins to walls
-const SHAKE_DEADZONE = 2.5; // m/s^2 — ignore sensor noise and hand tremor
+const SHAKE_DEADZONE = 2.5; // m/s^2 — ignore sensor noise and hand tremor while the photo is moving
+const SHAKE_KICKOFF = 12; // m/s^2 — a resting photo only takes off on a real shake, not walking or picking the phone up
 const SHAKE_MAX_SPEED = 3000; // px/s
+const MOTION_MAX_DT = 0.1; // s — cap the gap between motion events
+
+const clampSpeed = (v) => Math.max(-SHAKE_MAX_SPEED, Math.min(SHAKE_MAX_SPEED, v));
 
 // Rotate device-frame acceleration into screen coordinates (x right, y down).
 function deviceToScreen(ax, ay) {
@@ -104,26 +108,33 @@ function App() {
         physicsRef.current = null;
     };
 
-    const startPhysics = (startX, startY, vx, vy) => {
-        const wrapper = photoWrapperRef.current;
-        if (!wrapper) return;
+    // Offset range that keeps the photo inside the viewport
+    const computeBounds = (wrapper) => {
         const rect = wrapper.getBoundingClientRect();
-        // Layout origin = current visual position minus the offset we've applied
-        const homeLeft = rect.left - startX;
-        const homeTop = rect.top - startY;
-        const bounds = {
+        // Layout origin = current visual position minus the translate actually rendered
+        const rendered = new DOMMatrixReadOnly(getComputedStyle(wrapper).transform);
+        const homeLeft = rect.left - rendered.m41;
+        const homeTop = rect.top - rendered.m42;
+        return {
             minX: -homeLeft,
             maxX: window.innerWidth - homeLeft - rect.width,
             minY: -homeTop,
             maxY: window.innerHeight - homeTop - rect.height,
         };
+    };
 
-        physicsRef.current = { x: startX, y: startY, vx, vy };
+    const startPhysics = (startX, startY, vx, vy) => {
+        const wrapper = photoWrapperRef.current;
+        if (!wrapper) return;
+
+        // Shaking can keep the loop alive indefinitely, so follow rotation / address-bar resizes
+        physicsRef.current = { x: startX, y: startY, vx, vy, bounds: computeBounds(wrapper) };
         let lastTime = performance.now();
 
         const step = (now) => {
             const p = physicsRef.current;
             if (!p) return;
+            const { bounds } = p;
             const dt = Math.min((now - lastTime) / 1000, 0.05); // clamp to 50ms
             lastTime = now;
 
@@ -250,29 +261,42 @@ function App() {
         if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
             return;
         }
+        let lastMotionTime = null;
         const onMotion = (e) => {
+            // Measure dt ourselves: e.interval units differ between browsers (ms vs s)
+            const now = performance.now();
+            const dt = lastMotionTime == null ? 0.016 : Math.min((now - lastMotionTime) / 1000, MOTION_MAX_DT);
+            lastMotionTime = now;
+
             const a = e.acceleration;
             if (!a || a.x == null || a.y == null) return;
             if (dragRef.current) return; // user is holding the photo
-            if (Math.hypot(a.x, a.y) < SHAKE_DEADZONE) return;
+            const magnitude = Math.hypot(a.x, a.y);
+            const p = physicsRef.current;
+            if (magnitude < (p ? SHAKE_DEADZONE : SHAKE_KICKOFF)) return;
 
-            const dt = Math.min((e.interval || 16) / 1000, 0.1);
             const screenAcc = deviceToScreen(a.x, a.y);
             const dvx = -screenAcc.x * SHAKE_PX_PER_METER * dt;
             const dvy = -screenAcc.y * SHAKE_PX_PER_METER * dt;
-            const clamp = (v) => Math.max(-SHAKE_MAX_SPEED, Math.min(SHAKE_MAX_SPEED, v));
 
-            const p = physicsRef.current;
             if (p) {
-                p.vx = clamp(p.vx + dvx);
-                p.vy = clamp(p.vy + dvy);
+                p.vx = clampSpeed(p.vx + dvx);
+                p.vy = clampSpeed(p.vy + dvy);
             } else {
                 const { x, y } = photoOffsetRef.current;
-                startPhysics(x, y, clamp(dvx), clamp(dvy));
+                startPhysics(x, y, clampSpeed(dvx), clampSpeed(dvy));
             }
         };
+        const onResize = () => {
+            const p = physicsRef.current;
+            if (p && photoWrapperRef.current) p.bounds = computeBounds(photoWrapperRef.current);
+        };
         window.addEventListener('devicemotion', onMotion);
-        return () => window.removeEventListener('devicemotion', onMotion);
+        window.addEventListener('resize', onResize);
+        return () => {
+            window.removeEventListener('devicemotion', onMotion);
+            window.removeEventListener('resize', onResize);
+        };
     }, []);
 
     const shadow = colors.foregroundColor.luminance(0.08).hex();
@@ -321,6 +345,7 @@ function App() {
                         onKeyDown={(e) => {
                             if (e.key === 'Enter' || e.key === ' ') {
                                 e.preventDefault();
+                                requestMotionPermission();
                                 regenerateColors();
                             }
                         }}

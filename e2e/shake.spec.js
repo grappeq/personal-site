@@ -66,6 +66,52 @@ test('tiny motions (hand tremor) are ignored', async ({ page }) => {
     expect(await photoOffset(page)).toEqual({ x: 0, y: 0 });
 });
 
+test('walking-level motion does not knock a resting photo off its place', async ({ page }) => {
+    await shake(page, { x: 5, y: -5, count: 30 });
+    expect(await photoOffset(page)).toEqual({ x: 0, y: 0 });
+});
+
+for (const { angle, expectSign } of [
+    { angle: 90, expectSign: 1 },
+    { angle: 270, expectSign: -1 },
+]) {
+    test(`landscape (${angle}°) maps device axes to screen axes`, async ({ page }) => {
+        await page.addInitScript((angle) => {
+            Object.defineProperty(ScreenOrientation.prototype, 'angle', { get: () => angle });
+        }, angle);
+        await page.reload();
+        // Device y (toward the phone's top) points screen-left at 90° and screen-right at 270°.
+        // Accelerating toward the top, the photo lags the opposite way.
+        await shake(page, { y: 20 });
+        await expect
+            .poll(async () => (await photoOffset(page)).x * expectSign)
+            .toBeGreaterThan(5);
+    });
+}
+
+test('photo stays on screen when the viewport shrinks mid-shake', async ({ page }) => {
+    await shake(page, { y: -25, count: 5 });
+    await page.setViewportSize({ width: 412, height: 500 });
+    await shake(page, { x: 20, count: 20 });
+    // Wait until the photo comes to rest, then check it landed on the new floor, not below it
+    let previous = null;
+    await expect
+        .poll(
+            async () => {
+                const current = JSON.stringify(await photoOffset(page));
+                const resting = current === previous;
+                previous = current;
+                return resting;
+            },
+            { timeout: 15_000, intervals: [250] },
+        )
+        .toBe(true);
+    const rect = await photo(page).evaluate((el) => el.getBoundingClientRect().toJSON());
+    expect(rect.left).toBeGreaterThanOrEqual(-1);
+    expect(rect.bottom).toBeLessThanOrEqual(501);
+    expect(rect.bottom).toBeGreaterThan(495);
+});
+
 test('motion is ignored with prefers-reduced-motion', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.reload();
