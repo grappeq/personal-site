@@ -13,6 +13,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^25.0.1",
     "vite": "^6.0.0",
@@ -24,6 +25,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "deploy": "aws s3 sync ./dist s3://grabowski-personal-site --delete --acl public-read"
+    "deploy": "aws s3 sync ./dist s3://grabowski-personal-site --delete --acl public-read",
+    "test:e2e": "playwright test"
   }
 }
