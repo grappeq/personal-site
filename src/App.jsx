@@ -127,6 +127,7 @@ function App() {
     const startPhysics = (startX, startY, vx, vy) => {
         const wrapper = photoWrapperRef.current;
         if (!wrapper) return;
+        stopPhysics(); // never run two step loops on the same state
 
         // Shaking can keep the loop alive indefinitely, so follow rotation / address-bar resizes
         physicsRef.current = { x: startX, y: startY, vx, vy, bounds: computeBounds(wrapper) };
@@ -297,7 +298,7 @@ function App() {
     useEffect(() => {
         const onResize = () => {
             const wrapper = photoWrapperRef.current;
-            if (!wrapper) return;
+            if (!wrapper || dragRef.current) return; // the user's finger owns the photo mid-drag
             const bounds = computeBounds(wrapper);
             const p = physicsRef.current;
             if (p) {
@@ -306,7 +307,8 @@ function App() {
             }
             const { x, y } = photoOffsetRef.current;
             if (x === 0 && y === 0) return; // still at its layout position
-            if (x < bounds.minX || x > bounds.maxX || y < bounds.minY || y > bounds.maxY) {
+            // Out of view, or left floating above a floor that moved down
+            if (x < bounds.minX || x > bounds.maxX || y < bounds.minY || y < bounds.maxY - 0.5 || y > bounds.maxY) {
                 startPhysics(x, y, 0, 0);
             }
         };

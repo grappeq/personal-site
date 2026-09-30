@@ -32,6 +32,21 @@ async function trackExtremes(page) {
 
 const extremes = (page) => page.evaluate(() => window.__extremes);
 
+async function waitForRest(page) {
+    let previous = null;
+    await expect
+        .poll(
+            async () => {
+                const current = JSON.stringify(await photoOffset(page));
+                const resting = current === previous;
+                previous = current;
+                return resting;
+            },
+            { timeout: 15_000, intervals: [250] },
+        )
+        .toBe(true);
+}
+
 // Fire a burst of devicemotion events, as a phone does at ~60Hz while being shaken.
 async function shake(page, { x = 0, y = 0, count = 10 } = {}) {
     await page.evaluate(
@@ -125,19 +140,8 @@ test('photo stays on screen when the viewport shrinks mid-shake', async ({ page 
     await shake(page, { y: -25, count: 5 });
     await page.setViewportSize({ width: 412, height: 500 });
     await shake(page, { x: 20, count: 20 });
-    // Wait until the photo comes to rest, then check it landed on the new floor, not below it
-    let previous = null;
-    await expect
-        .poll(
-            async () => {
-                const current = JSON.stringify(await photoOffset(page));
-                const resting = current === previous;
-                previous = current;
-                return resting;
-            },
-            { timeout: 15_000, intervals: [250] },
-        )
-        .toBe(true);
+    // Check it landed on the new floor, not below it
+    await waitForRest(page);
     const rect = await photo(page).evaluate((el) => el.getBoundingClientRect().toJSON());
     expect(rect.left).toBeGreaterThanOrEqual(-1);
     expect(rect.bottom).toBeLessThanOrEqual(501);
@@ -152,11 +156,35 @@ test('a resting photo is pulled back on screen after a rotate/resize', async ({ 
             timeout: 10_000,
         })
         .toBeGreaterThan(830);
-    await page.waitForTimeout(3000);
+    await waitForRest(page);
     await page.setViewportSize({ width: 839, height: 412 });
     await expect
         .poll(async () => photo(page).evaluate((el) => el.getBoundingClientRect().bottom), { timeout: 10_000 })
         .toBeLessThanOrEqual(413);
+});
+
+test('a resting photo drops to the new floor when the viewport grows', async ({ page }) => {
+    await page.setViewportSize({ width: 839, height: 412 });
+    await shake(page, { x: 20 });
+    await waitForRest(page);
+    await page.setViewportSize({ width: 412, height: 839 });
+    await expect
+        .poll(async () => photo(page).evaluate((el) => el.getBoundingClientRect().bottom), { timeout: 10_000 })
+        .toBeGreaterThan(834);
+});
+
+test('resizing mid-drag does not start physics under the finger', async ({ page }) => {
+    const box = await photo(page).boundingBox();
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx, cy + 600, { steps: 10 }); // drag far below the future floor
+    await page.setViewportSize({ width: 839, height: 412 });
+    await page.waitForTimeout(500);
+    const offset = await photoOffset(page);
+    expect(offset.y).toBeCloseTo(600, 0); // still exactly where the finger put it
+    await page.mouse.up();
 });
 
 test('motion is ignored with prefers-reduced-motion', async ({ page }) => {
