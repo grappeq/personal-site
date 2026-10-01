@@ -45,9 +45,10 @@ const DRAG_THRESHOLD_PX = 6; // movement above this counts as drag, not click
 const VELOCITY_SAMPLE_MS = 90; // window for release-velocity calculation
 
 // Shake-to-bounce: phone acceleration is applied (inverted) to the photo, like a loose object in a box
-const SHAKE_PX_PER_METER = 300; // scaled way down from real screen density, or the photo just pins to walls
-const SHAKE_DEADZONE = 2.5; // m/s^2 — ignore sensor noise and hand tremor while the photo is moving
-const SHAKE_KICKOFF = 12; // m/s^2 — a resting photo only takes off on a real shake, not walking or picking the phone up
+// Only active once the photo has been thrown, so an untouched page never moves on its own.
+const SHAKE_PX_PER_METER = 800; // scaled down from real screen density, or the photo just pins to walls
+const SHAKE_DEADZONE = 1.5; // m/s^2 — ignore sensor noise and hand tremor while the photo is moving
+const SHAKE_KICKOFF = 5; // m/s^2 — a resting photo needs a light shake, not just the phone being held
 const SHAKE_MAX_SPEED = 3000; // px/s
 const MOTION_FRESH_DT = 0.016; // s — assumed dt for the first event after a pause
 const MOTION_MAX_DT = 0.1; // s — a longer gap between motion events counts as a pause
@@ -87,6 +88,7 @@ function App() {
     // Photo throw state
     const photoWrapperRef = useRef(null);
     const dragRef = useRef(null);
+    const shakeArmedRef = useRef(false); // set by the first throw
     const physicsRef = useRef(null);
     const physicsFrameRef = useRef(null);
     const [photoOffset, setPhotoOffsetState] = useState({ x: 0, y: 0 });
@@ -216,12 +218,14 @@ function App() {
         if (!drag || drag.pointerId !== e.pointerId) return;
         photoWrapperRef.current?.releasePointerCapture(e.pointerId);
         dragRef.current = null;
-        requestMotionPermission();
 
         if (!drag.moved) {
             regenerateColors();
             return;
         }
+
+        shakeArmedRef.current = true;
+        requestMotionPermission();
 
         const finalX = drag.startOffsetX + (e.clientX - drag.startClientX);
         const finalY = drag.startOffsetY + (e.clientY - drag.startClientY);
@@ -273,6 +277,7 @@ function App() {
 
             const a = e.acceleration;
             if (!a || a.x == null || a.y == null) return;
+            if (!shakeArmedRef.current) return; // shaking unlocks after the first throw
             if (dragRef.current) return; // user is holding the photo
             const magnitude = Math.hypot(a.x, a.y);
             const p = physicsRef.current;
@@ -362,7 +367,6 @@ function App() {
                         onKeyDown={(e) => {
                             if (e.key === 'Enter' || e.key === ' ') {
                                 e.preventDefault();
-                                requestMotionPermission();
                                 regenerateColors();
                             }
                         }}
