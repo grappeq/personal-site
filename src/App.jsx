@@ -44,6 +44,34 @@ const REST_SPEED = 25; // px/s — below this (on floor) we stop the loop
 const DRAG_THRESHOLD_PX = 6; // movement above this counts as drag, not click
 const VELOCITY_SAMPLE_MS = 90; // window for release-velocity calculation
 
+// Shake-to-bounce: phone acceleration is applied (inverted) to the photo, like a loose object in a box
+const SHAKE_PX_PER_METER = 300; // scaled way down from real screen density, or the photo just pins to walls
+const SHAKE_DEADZONE = 2.5; // m/s^2 — ignore sensor noise and hand tremor while the photo is moving
+const SHAKE_KICKOFF = 12; // m/s^2 — a resting photo only takes off on a real shake, not walking or picking the phone up
+const SHAKE_MAX_SPEED = 3000; // px/s
+const MOTION_FRESH_DT = 0.016; // s — assumed dt for the first event after a pause
+const MOTION_MAX_DT = 0.1; // s — a longer gap between motion events counts as a pause
+
+const clampSpeed = (v) => Math.max(-SHAKE_MAX_SPEED, Math.min(SHAKE_MAX_SPEED, v));
+
+// Rotate device-frame acceleration into screen coordinates (x right, y down).
+function deviceToScreen(ax, ay) {
+    const angle = window.screen?.orientation?.angle ?? window.orientation ?? 0;
+    const rad = (angle * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    // Device y points up; screen y points down.
+    return { x: ax * cos - ay * sin, y: -(ax * sin + ay * cos) };
+}
+
+function requestMotionPermission() {
+    // iOS 13+ only grants motion events after an explicit request from a user gesture
+    const request = window.DeviceMotionEvent?.requestPermission;
+    if (typeof request === 'function') {
+        request.call(window.DeviceMotionEvent).catch(() => {});
+    }
+}
+
 function colorsForHue(hue) {
     const backgroundColor = chroma.hsl(hue, 1, 0.5).saturate(3).luminance(0.8);
     const [, saturation, lightness] = backgroundColor.hsl();
@@ -61,7 +89,12 @@ function App() {
     const dragRef = useRef(null);
     const physicsRef = useRef(null);
     const physicsFrameRef = useRef(null);
-    const [photoOffset, setPhotoOffset] = useState({ x: 0, y: 0 });
+    const [photoOffset, setPhotoOffsetState] = useState({ x: 0, y: 0 });
+    const photoOffsetRef = useRef(photoOffset);
+    const setPhotoOffset = (offset) => {
+        photoOffsetRef.current = offset;
+        setPhotoOffsetState(offset);
+    };
 
     const regenerateColors = () => {
         hueRef.current = Math.random() * 360;
@@ -76,26 +109,34 @@ function App() {
         physicsRef.current = null;
     };
 
-    const startPhysics = (startX, startY, vx, vy) => {
-        const wrapper = photoWrapperRef.current;
-        if (!wrapper) return;
+    // Offset range that keeps the photo inside the viewport
+    const computeBounds = (wrapper) => {
         const rect = wrapper.getBoundingClientRect();
-        // Layout origin = current visual position minus the offset we've applied
-        const homeLeft = rect.left - startX;
-        const homeTop = rect.top - startY;
-        const bounds = {
+        // Layout origin = current visual position minus the translate actually rendered
+        const rendered = new DOMMatrixReadOnly(getComputedStyle(wrapper).transform);
+        const homeLeft = rect.left - rendered.m41;
+        const homeTop = rect.top - rendered.m42;
+        return {
             minX: -homeLeft,
             maxX: window.innerWidth - homeLeft - rect.width,
             minY: -homeTop,
             maxY: window.innerHeight - homeTop - rect.height,
         };
+    };
 
-        physicsRef.current = { x: startX, y: startY, vx, vy };
+    const startPhysics = (startX, startY, vx, vy) => {
+        const wrapper = photoWrapperRef.current;
+        if (!wrapper) return;
+        stopPhysics(); // never run two step loops on the same state
+
+        // Shaking can keep the loop alive indefinitely, so follow rotation / address-bar resizes
+        physicsRef.current = { x: startX, y: startY, vx, vy, bounds: computeBounds(wrapper) };
         let lastTime = performance.now();
 
         const step = (now) => {
             const p = physicsRef.current;
             if (!p) return;
+            const { bounds } = p;
             const dt = Math.min((now - lastTime) / 1000, 0.05); // clamp to 50ms
             lastTime = now;
 
@@ -175,6 +216,7 @@ function App() {
         if (!drag || drag.pointerId !== e.pointerId) return;
         photoWrapperRef.current?.releasePointerCapture(e.pointerId);
         dragRef.current = null;
+        requestMotionPermission();
 
         if (!drag.moved) {
             regenerateColors();
@@ -216,6 +258,63 @@ function App() {
     }, []);
 
     useEffect(() => stopPhysics, []);
+
+    useEffect(() => {
+        if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+            return;
+        }
+        let lastMotionTime = null;
+        const onMotion = (e) => {
+            // Measure dt ourselves: e.interval units differ between browsers (ms vs s)
+            const now = performance.now();
+            const gap = lastMotionTime == null ? Infinity : (now - lastMotionTime) / 1000;
+            const dt = gap > MOTION_MAX_DT ? MOTION_FRESH_DT : gap;
+            lastMotionTime = now;
+
+            const a = e.acceleration;
+            if (!a || a.x == null || a.y == null) return;
+            if (dragRef.current) return; // user is holding the photo
+            const magnitude = Math.hypot(a.x, a.y);
+            const p = physicsRef.current;
+            if (magnitude < (p ? SHAKE_DEADZONE : SHAKE_KICKOFF)) return;
+
+            const screenAcc = deviceToScreen(a.x, a.y);
+            const dvx = -screenAcc.x * SHAKE_PX_PER_METER * dt;
+            const dvy = -screenAcc.y * SHAKE_PX_PER_METER * dt;
+
+            if (p) {
+                p.vx = clampSpeed(p.vx + dvx);
+                p.vy = clampSpeed(p.vy + dvy);
+            } else {
+                const { x, y } = photoOffsetRef.current;
+                startPhysics(x, y, clampSpeed(dvx), clampSpeed(dvy));
+            }
+        };
+        window.addEventListener('devicemotion', onMotion);
+        return () => window.removeEventListener('devicemotion', onMotion);
+    }, []);
+
+    // Shaking often triggers auto-rotate, so keep the photo inside the viewport on resize
+    useEffect(() => {
+        const onResize = () => {
+            const wrapper = photoWrapperRef.current;
+            if (!wrapper || dragRef.current) return; // the user's finger owns the photo mid-drag
+            const bounds = computeBounds(wrapper);
+            const p = physicsRef.current;
+            if (p) {
+                p.bounds = bounds;
+                return;
+            }
+            const { x, y } = photoOffsetRef.current;
+            if (x === 0 && y === 0) return; // still at its layout position
+            // Out of view, or left floating above a floor that moved down
+            if (x < bounds.minX || x > bounds.maxX || y < bounds.minY || y < bounds.maxY - 0.5 || y > bounds.maxY) {
+                startPhysics(x, y, 0, 0);
+            }
+        };
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+    }, []);
 
     const shadow = colors.foregroundColor.luminance(0.08).hex();
     const textStyle = {
@@ -263,6 +362,7 @@ function App() {
                         onKeyDown={(e) => {
                             if (e.key === 'Enter' || e.key === ' ') {
                                 e.preventDefault();
+                                requestMotionPermission();
                                 regenerateColors();
                             }
                         }}
